@@ -90,11 +90,12 @@
     flex: 1; min-width: 0; color: var(--muted);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .card-foot a.save {
+  .card-foot button.save {
     background: var(--accent); color: #1a1606; font-weight: 600;
-    padding: 6px 12px; border-radius: 8px; text-decoration: none; font-size: 13px;
+    padding: 6px 12px; border-radius: 8px; font-size: 13px;
+    border: none; cursor: pointer;
   }
-  .card-foot a.save.disabled { background: #2a2a26; color: #5a5750; pointer-events: none; }
+  .card-foot button.save:disabled { background: #2a2a26; color: #5a5750; cursor: not-allowed; }
 
   .tip {
     background: #11110f; border: 1px solid var(--line); border-radius: 10px;
@@ -137,7 +138,7 @@
   <div class="grid" id="grid"></div>
 
   <div class="tip">
-    <b>모바일 저장 팁</b> — 결과물의 <b>저장</b> 버튼을 누르세요. iOS Safari에서 다운로드가 막힐 경우 결과 이미지를 <b>길게 눌러 “이미지 저장”</b>을 선택하면 됩니다.
+    <b>모바일 저장 팁</b> — <b>저장</b> 버튼을 누르면 OS 공유 시트가 열립니다. 거기서 <b>"이미지 저장"</b> / <b>"사진에 저장"</b>을 선택하면 사진 앨범으로 들어갑니다. (PC에서는 일반 다운로드)
   </div>
 
   <footer>dreamy VHS · early 2000s CCD digicam · analog tape · cloudy summer</footer>
@@ -154,7 +155,7 @@
   const countEl = document.getElementById('count');
   const errbox = document.getElementById('errbox');
 
-  /** @type {{id:number, name:string, blobUrl:string|null, ready:boolean, card:HTMLElement, saveLink:HTMLAnchorElement}[]} */
+  /** @type {{id:number, name:string, blob:Blob|null, blobUrl:string|null, ready:boolean, card:HTMLElement, saveBtn:HTMLButtonElement}[]} */
   const items = [];
   let nextId = 1;
 
@@ -211,13 +212,47 @@
   });
 
   saveAllBtn.addEventListener('click', async () => {
-    for (const it of items) {
-      if (!it.ready) continue;
-      it.saveLink.click();
-      // small delay so mobile browsers don't suppress multiple downloads
-      await new Promise(r => setTimeout(r, 350));
+    const ready = items.filter(i => i.ready && i.blob);
+    if (!ready.length) return;
+    const files = ready.map(it => new File([it.blob], it.name, { type: it.blob.type || 'image/jpeg' }));
+    // Prefer one combined share sheet when supported
+    if (navigator.canShare && navigator.canShare({ files })) {
+      try {
+        await navigator.share({ files });
+        return;
+      } catch (err) {
+        if (err && err.name === 'AbortError') return;
+      }
+    }
+    // Fallback: save items one at a time
+    for (const it of ready) {
+      await saveItem(it);
+      await new Promise(r => setTimeout(r, 250));
     }
   });
+
+  async function saveItem(item) {
+    if (!item.ready || !item.blob) return;
+    const file = new File([item.blob], item.name, { type: item.blob.type || 'image/jpeg' });
+    // Mobile: open native share sheet so user can "사진에 저장" → 사진 앨범
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: item.name });
+        return;
+      } catch (err) {
+        if (err && err.name === 'AbortError') return; // user cancelled, OK
+        // any other error → fall through to download fallback
+      }
+    }
+    // Desktop / unsupported: fall back to download
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url; a.download = item.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
 
   function looksLikeImage(file) {
     if (!file) return false;
@@ -264,27 +299,28 @@
       </div>
       <div class="card-foot">
         <span class="name"></span>
-        <a class="save disabled" download="${outName}">저장</a>
+        <button class="save" type="button" disabled>저장</button>
       </div>
     `;
     card.querySelector('.name').textContent = outName;
     grid.appendChild(card);
 
+    const saveBtn = card.querySelector('button.save');
     const item = {
-      id, name: outName, blobUrl: null, ready: false, card,
-      saveLink: card.querySelector('a.save'),
+      id, name: outName, blob: null, blobUrl: null, ready: false, card, saveBtn,
     };
+    saveBtn.addEventListener('click', () => saveItem(item));
     items.push(item);
     updateUi();
 
     processImage(file).then(blob => {
       const url = URL.createObjectURL(blob);
+      item.blob = blob;
       item.blobUrl = url;
       item.ready = true;
       const img = card.querySelector('img');
       img.src = url;
-      item.saveLink.href = url;
-      item.saveLink.classList.remove('disabled');
+      saveBtn.disabled = false;
       card.querySelector('.card-loading').classList.add('hidden');
       updateUi();
     }).catch(err => {
