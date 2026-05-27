@@ -102,6 +102,14 @@
   }
   .tip b { color: var(--fg); font-weight: 600; }
 
+  .errbox {
+    margin-top: 12px; padding: 10px 12px; border-radius: 10px;
+    background: #2a1414; border: 1px solid #5a2222; color: #ffb4b4;
+    font-size: 12px; white-space: pre-wrap; word-break: break-word;
+    display: none;
+  }
+  .errbox.show { display: block; }
+
   footer { margin-top: 30px; color: #4a4842; font-size: 11px; text-align: center; }
 </style>
 </head>
@@ -112,17 +120,19 @@
     <p class="sub">사진 1~10장을 올리면 드리미한 VHS / CCD 디카 감성으로 변환합니다.</p>
   </header>
 
-  <label class="uploader" id="uploader">
+  <div class="uploader" id="uploader" role="button" tabindex="0">
     <p class="big">탭하여 사진 선택 · 또는 드래그</p>
     <p class="small">JPG · PNG · WEBP · HEIC — 최대 10장</p>
-    <input type="file" id="fileInput" accept="image/*" multiple />
-  </label>
+  </div>
+  <input type="file" id="fileInput" accept="image/*" multiple style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" />
 
   <div class="controls">
     <button id="clearBtn" disabled>전체 지우기</button>
     <button id="saveAllBtn" class="btn-primary" disabled>전체 저장</button>
     <span class="count" id="count">0 / 10</span>
   </div>
+
+  <div class="errbox" id="errbox"></div>
 
   <div class="grid" id="grid"></div>
 
@@ -142,10 +152,26 @@
   const clearBtn = document.getElementById('clearBtn');
   const saveAllBtn = document.getElementById('saveAllBtn');
   const countEl = document.getElementById('count');
+  const errbox = document.getElementById('errbox');
 
   /** @type {{id:number, name:string, blobUrl:string|null, ready:boolean, card:HTMLElement, saveLink:HTMLAnchorElement}[]} */
   const items = [];
   let nextId = 1;
+
+  function showError(msg) {
+    errbox.textContent = msg;
+    errbox.classList.add('show');
+  }
+  function clearError() {
+    errbox.textContent = '';
+    errbox.classList.remove('show');
+  }
+  window.addEventListener('error', (e) => {
+    showError('스크립트 오류: ' + (e.message || String(e.error || e)));
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    showError('처리 오류: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)));
+  });
 
   function updateUi() {
     countEl.textContent = `${items.length} / ${MAX_FILES}`;
@@ -154,8 +180,13 @@
   }
 
   // --- Upload handlers ---
-  uploader.addEventListener('click', (e) => {
-    if (e.target.tagName !== 'INPUT') fileInput.click();
+  function openPicker() {
+    clearError();
+    fileInput.click();
+  }
+  uploader.addEventListener('click', openPicker);
+  uploader.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPicker(); }
   });
   uploader.addEventListener('dragover', (e) => {
     e.preventDefault(); uploader.classList.add('drag');
@@ -166,14 +197,16 @@
     if (e.dataTransfer && e.dataTransfer.files) handleFiles(e.dataTransfer.files);
   });
   fileInput.addEventListener('change', () => {
-    if (fileInput.files) handleFiles(fileInput.files);
-    fileInput.value = '';
+    if (fileInput.files && fileInput.files.length) handleFiles(fileInput.files);
+    // reset on next tick so iOS Safari doesn't lose the file list mid-handler
+    setTimeout(() => { fileInput.value = ''; }, 0);
   });
 
   clearBtn.addEventListener('click', () => {
     items.forEach(it => { if (it.blobUrl) URL.revokeObjectURL(it.blobUrl); });
     items.length = 0;
     grid.innerHTML = '';
+    clearError();
     updateUi();
   });
 
@@ -186,16 +219,33 @@
     }
   });
 
+  function looksLikeImage(file) {
+    if (!file) return false;
+    if (file.type && file.type.startsWith('image/')) return true;
+    // Some iOS/Android picks deliver an empty MIME type or generic octet-stream
+    if (!file.type || file.type === 'application/octet-stream') {
+      return /\.(heic|heif|jpe?g|png|webp|gif|bmp|tiff?)$/i.test(file.name || '');
+    }
+    return false;
+  }
+
   function handleFiles(fileList) {
-    const files = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+    clearError();
+    const all = Array.from(fileList);
+    const files = all.filter(looksLikeImage);
+    if (files.length === 0) {
+      showError(`이미지 파일이 인식되지 않았어요. (${all.length}개 선택됨)\n` +
+        all.map(f => `· ${f.name || '(이름없음)'} [${f.type || '타입없음'}]`).join('\n'));
+      return;
+    }
     const room = MAX_FILES - items.length;
     if (room <= 0) {
-      alert(`최대 ${MAX_FILES}장까지만 처리할 수 있어요.`);
+      showError(`최대 ${MAX_FILES}장까지만 처리할 수 있어요. 먼저 "전체 지우기"를 눌러주세요.`);
       return;
     }
     const accepted = files.slice(0, room);
     if (files.length > accepted.length) {
-      alert(`최대 ${MAX_FILES}장까지 가능합니다. 처음 ${accepted.length}장만 사용합니다.`);
+      showError(`최대 ${MAX_FILES}장까지 가능합니다. 처음 ${accepted.length}장만 사용합니다.`);
     }
     accepted.forEach(addItem);
   }
@@ -240,6 +290,7 @@
     }).catch(err => {
       console.error(err);
       card.querySelector('.card-loading').innerHTML = '오류 — 다른 사진을 시도해 주세요';
+      showError('처리 실패: ' + (err && err.message ? err.message : String(err)));
     });
   }
 
@@ -247,10 +298,13 @@
 
   async function processImage(file) {
     const bitmap = await loadBitmap(file);
-    const MAX_DIM = 1600;
-    const scale = Math.min(1, MAX_DIM / Math.max(bitmap.width, bitmap.height));
-    const W = Math.max(1, Math.round(bitmap.width * scale));
-    const H = Math.max(1, Math.round(bitmap.height * scale));
+    const srcW = bitmap.width || bitmap.naturalWidth;
+    const srcH = bitmap.height || bitmap.naturalHeight;
+    if (!srcW || !srcH) throw new Error('이미지 크기를 읽지 못했어요 (HEIC 미지원 브라우저 가능)');
+    const MAX_DIM = 1280;
+    const scale = Math.min(1, MAX_DIM / Math.max(srcW, srcH));
+    const W = Math.max(1, Math.round(srcW * scale));
+    const H = Math.max(1, Math.round(srcH * scale));
 
     // 1) Draw base, downscaled then upscaled to mimic low-res CCD sensor
     const lowW = Math.max(64, Math.round(W * 0.62));
@@ -300,16 +354,28 @@
   }
 
   async function loadBitmap(file) {
-    if (window.createImageBitmap) {
-      try {
-        return await createImageBitmap(file, { imageOrientation: 'from-image' });
-      } catch (_) { /* fall through */ }
+    // Prefer <img> on iOS Safari — it handles HEIC natively and avoids
+    // createImageBitmap quirks. Fall through to createImageBitmap otherwise.
+    try {
+      return await loadHTMLImage(file);
+    } catch (e) {
+      if (window.createImageBitmap) {
+        try {
+          return await createImageBitmap(file);
+        } catch (_) { /* fall through to throw */ }
+      }
+      throw new Error('이미지를 디코딩하지 못했어요. (' + (file.name || 'unknown') + ')');
     }
+  }
+
+  function loadHTMLImage(file) {
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
-      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
-      img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+      img.decoding = 'async';
+      const cleanup = () => URL.revokeObjectURL(url);
+      img.onload = () => { cleanup(); resolve(img); };
+      img.onerror = () => { cleanup(); reject(new Error('img load failed')); };
       img.src = url;
     });
   }
