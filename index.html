@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#0a0a0a" />
+<title>VHS · CCD Filter</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --fg: #e8e6df;
+    --muted: #8a8780;
+    --accent: #c8b97a;
+    --line: #1d1d1b;
+    --card: #111110;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    line-height: 1.5; min-height: 100vh; min-height: 100dvh;
+    padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom);
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 80px; }
+  header { margin-bottom: 20px; }
+  h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: 0.02em; }
+  h1 .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent); margin-right:8px; vertical-align:2px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0; }
+
+  .uploader {
+    border: 1.5px dashed #2a2a27; border-radius: 14px;
+    padding: 28px 16px; text-align: center; background: #0f0f0e;
+    transition: border-color .15s, background .15s;
+    cursor: pointer; user-select: none;
+  }
+  .uploader.drag { border-color: var(--accent); background: #15140e; }
+  .uploader p { margin: 6px 0; }
+  .uploader .big { font-size: 15px; color: var(--fg); }
+  .uploader .small { font-size: 12px; color: var(--muted); }
+  .uploader input[type=file] { display: none; }
+
+  .controls {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    margin: 16px 0 8px; align-items: center;
+  }
+  button, .btn {
+    appearance: none; border: none; cursor: pointer;
+    background: #1a1a18; color: var(--fg);
+    padding: 10px 14px; border-radius: 10px; font-size: 14px;
+    font-family: inherit; transition: background .15s, opacity .15s;
+  }
+  button:hover { background: #232320; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #1a1606; font-weight: 600; }
+  .btn-primary:hover { background: #d6c684; }
+
+  .count { color: var(--muted); font-size: 13px; margin-left: auto; }
+
+  .grid { display: grid; gap: 14px; margin-top: 18px; }
+  @media (min-width: 520px) { .grid { grid-template-columns: 1fr 1fr; } }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; overflow: hidden; position: relative;
+  }
+  .card-img-wrap {
+    position: relative; aspect-ratio: 1 / 1; background: #050505;
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  .card-img-wrap img {
+    width: 100%; height: 100%; object-fit: contain; display: block;
+    -webkit-touch-callout: default; touch-callout: default;
+  }
+  .card-loading {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.6); color: var(--muted); font-size: 12px;
+    letter-spacing: 0.1em; text-transform: uppercase;
+  }
+  .card-loading.hidden { display: none; }
+  .card-loading .spin {
+    width: 14px; height: 14px; border: 2px solid #333; border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .card-foot {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px;
+  }
+  .card-foot .name {
+    flex: 1; min-width: 0; color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .card-foot a.save {
+    background: var(--accent); color: #1a1606; font-weight: 600;
+    padding: 6px 12px; border-radius: 8px; text-decoration: none; font-size: 13px;
+  }
+  .card-foot a.save.disabled { background: #2a2a26; color: #5a5750; pointer-events: none; }
+
+  .tip {
+    background: #11110f; border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 12px; font-size: 12px; color: var(--muted); margin-top: 14px;
+  }
+  .tip b { color: var(--fg); font-weight: 600; }
+
+  footer { margin-top: 30px; color: #4a4842; font-size: 11px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="dot"></span>VHS · CCD Filter</h1>
+    <p class="sub">사진 1~10장을 올리면 드리미한 VHS / CCD 디카 감성으로 변환합니다.</p>
+  </header>
+
+  <label class="uploader" id="uploader">
+    <p class="big">탭하여 사진 선택 · 또는 드래그</p>
+    <p class="small">JPG · PNG · WEBP · HEIC — 최대 10장</p>
+    <input type="file" id="fileInput" accept="image/*" multiple />
+  </label>
+
+  <div class="controls">
+    <button id="clearBtn" disabled>전체 지우기</button>
+    <button id="saveAllBtn" class="btn-primary" disabled>전체 저장</button>
+    <span class="count" id="count">0 / 10</span>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="tip">
+    <b>모바일 저장 팁</b> — 결과물의 <b>저장</b> 버튼을 누르세요. iOS Safari에서 다운로드가 막힐 경우 결과 이미지를 <b>길게 눌러 “이미지 저장”</b>을 선택하면 됩니다.
+  </div>
+
+  <footer>dreamy VHS · early 2000s CCD digicam · analog tape · cloudy summer</footer>
+</div>
+
+<script>
+(() => {
+  const MAX_FILES = 10;
+  const grid = document.getElementById('grid');
+  const fileInput = document.getElementById('fileInput');
+  const uploader = document.getElementById('uploader');
+  const clearBtn = document.getElementById('clearBtn');
+  const saveAllBtn = document.getElementById('saveAllBtn');
+  const countEl = document.getElementById('count');
+
+  /** @type {{id:number, name:string, blobUrl:string|null, ready:boolean, card:HTMLElement, saveLink:HTMLAnchorElement}[]} */
+  const items = [];
+  let nextId = 1;
+
+  function updateUi() {
+    countEl.textContent = `${items.length} / ${MAX_FILES}`;
+    clearBtn.disabled = items.length === 0;
+    saveAllBtn.disabled = items.length === 0 || items.some(i => !i.ready);
+  }
+
+  // --- Upload handlers ---
+  uploader.addEventListener('click', (e) => {
+    if (e.target.tagName !== 'INPUT') fileInput.click();
+  });
+  uploader.addEventListener('dragover', (e) => {
+    e.preventDefault(); uploader.classList.add('drag');
+  });
+  uploader.addEventListener('dragleave', () => uploader.classList.remove('drag'));
+  uploader.addEventListener('drop', (e) => {
+    e.preventDefault(); uploader.classList.remove('drag');
+    if (e.dataTransfer && e.dataTransfer.files) handleFiles(e.dataTransfer.files);
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files) handleFiles(fileInput.files);
+    fileInput.value = '';
+  });
+
+  clearBtn.addEventListener('click', () => {
+    items.forEach(it => { if (it.blobUrl) URL.revokeObjectURL(it.blobUrl); });
+    items.length = 0;
+    grid.innerHTML = '';
+    updateUi();
+  });
+
+  saveAllBtn.addEventListener('click', async () => {
+    for (const it of items) {
+      if (!it.ready) continue;
+      it.saveLink.click();
+      // small delay so mobile browsers don't suppress multiple downloads
+      await new Promise(r => setTimeout(r, 350));
+    }
+  });
+
+  function handleFiles(fileList) {
+    const files = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+    const room = MAX_FILES - items.length;
+    if (room <= 0) {
+      alert(`최대 ${MAX_FILES}장까지만 처리할 수 있어요.`);
+      return;
+    }
+    const accepted = files.slice(0, room);
+    if (files.length > accepted.length) {
+      alert(`최대 ${MAX_FILES}장까지 가능합니다. 처음 ${accepted.length}장만 사용합니다.`);
+    }
+    accepted.forEach(addItem);
+  }
+
+  function addItem(file) {
+    const id = nextId++;
+    const baseName = (file.name || `photo_${id}`).replace(/\.[^.]+$/, '');
+    const outName = `${baseName}_vhs.jpg`;
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="card-img-wrap">
+        <img alt="" />
+        <div class="card-loading"><span class="spin"></span>처리 중…</div>
+      </div>
+      <div class="card-foot">
+        <span class="name"></span>
+        <a class="save disabled" download="${outName}">저장</a>
+      </div>
+    `;
+    card.querySelector('.name').textContent = outName;
+    grid.appendChild(card);
+
+    const item = {
+      id, name: outName, blobUrl: null, ready: false, card,
+      saveLink: card.querySelector('a.save'),
+    };
+    items.push(item);
+    updateUi();
+
+    processImage(file).then(blob => {
+      const url = URL.createObjectURL(blob);
+      item.blobUrl = url;
+      item.ready = true;
+      const img = card.querySelector('img');
+      img.src = url;
+      item.saveLink.href = url;
+      item.saveLink.classList.remove('disabled');
+      card.querySelector('.card-loading').classList.add('hidden');
+      updateUi();
+    }).catch(err => {
+      console.error(err);
+      card.querySelector('.card-loading').innerHTML = '오류 — 다른 사진을 시도해 주세요';
+    });
+  }
+
+  // ---------- Image processing ----------
+
+  async function processImage(file) {
+    const bitmap = await loadBitmap(file);
+    const MAX_DIM = 1600;
+    const scale = Math.min(1, MAX_DIM / Math.max(bitmap.width, bitmap.height));
+    const W = Math.max(1, Math.round(bitmap.width * scale));
+    const H = Math.max(1, Math.round(bitmap.height * scale));
+
+    // 1) Draw base, downscaled then upscaled to mimic low-res CCD sensor
+    const lowW = Math.max(64, Math.round(W * 0.62));
+    const lowH = Math.max(64, Math.round(H * 0.62));
+
+    const small = document.createElement('canvas');
+    small.width = lowW; small.height = lowH;
+    const sctx = small.getContext('2d');
+    sctx.imageSmoothingEnabled = true;
+    sctx.imageSmoothingQuality = 'medium';
+    sctx.drawImage(bitmap, 0, 0, lowW, lowH);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'low'; // softer upscale = cheap lens softness
+    // light bilinear softness
+    ctx.filter = 'blur(0.6px)';
+    ctx.drawImage(small, 0, 0, W, H);
+    ctx.filter = 'none';
+
+    // 2) Pixel-level grading: lift blacks, soft rolloff, green/yellow tint, low contrast, overexposure
+    const imageData = ctx.getImageData(0, 0, W, H);
+    gradePixels(imageData.data);
+    ctx.putImageData(imageData, 0, 0);
+
+    // 3) Chromatic aberration — slight red/blue offset
+    applyChromaticAberration(ctx, W, H);
+
+    // 4) Bloom — extract highlights, blur, screen-composite
+    applyBloom(ctx, W, H);
+
+    // 5) Grain / analog tape noise
+    applyGrain(ctx, W, H, 14);
+
+    // 6) Subtle horizontal tape lines + slight scan modulation
+    applyTapeLines(ctx, W, H);
+
+    // 7) Vignette
+    applyVignette(ctx, W, H);
+
+    // 8) Date stamp (optional, in lower-right) — gives that '00s digicam feel
+    drawDateStamp(ctx, W, H);
+
+    return canvasToBlob(canvas, 'image/jpeg', 0.9);
+  }
+
+  async function loadBitmap(file) {
+    if (window.createImageBitmap) {
+      try {
+        return await createImageBitmap(file, { imageOrientation: 'from-image' });
+      } catch (_) { /* fall through */ }
+    }
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+      img.src = url;
+    });
+  }
+
+  function canvasToBlob(canvas, type, quality) {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), type, quality);
+    });
+  }
+
+  // --- Color grading (lookup-table-ish in JS) ---
+  function gradePixels(data) {
+    // Precompute tone curves per channel
+    // Lift blacks, compress highlights toward dirty white, slight green/yellow tint
+    const curveR = buildCurve({ lift: 0.05, gamma: 1.05, gain: 0.97, highlightRoll: 0.85 });
+    const curveG = buildCurve({ lift: 0.06, gamma: 0.98, gain: 1.02, highlightRoll: 0.88 });
+    const curveB = buildCurve({ lift: 0.07, gamma: 1.10, gain: 0.90, highlightRoll: 0.82 });
+
+    for (let i = 0; i < data.length; i += 4) {
+      let r = curveR[data[i]];
+      let g = curveG[data[i + 1]];
+      let b = curveB[data[i + 2]];
+
+      // Desaturate slightly (washed cinematic colors)
+      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      const sat = 0.82;
+      r = lum + (r - lum) * sat;
+      g = lum + (g - lum) * sat;
+      b = lum + (b - lum) * sat;
+
+      // Subtle green tint everywhere (CCD)
+      g += 4;
+
+      // Lower contrast (low dynamic range)
+      const mid = 128;
+      const c = 0.92;
+      r = mid + (r - mid) * c;
+      g = mid + (g - mid) * c;
+      b = mid + (b - mid) * c;
+
+      // Push highlights toward dirty white (warm yellow blown highlights)
+      const hl = Math.max(0, (Math.max(r, g, b) - 200) / 55); // 0..1
+      r += hl * 18;
+      g += hl * 14;
+      b += hl * -6;
+
+      data[i]     = clamp8(r);
+      data[i + 1] = clamp8(g);
+      data[i + 2] = clamp8(b);
+      // alpha stays
+    }
+  }
+
+  function buildCurve({ lift, gamma, gain, highlightRoll }) {
+    const arr = new Uint8ClampedArray(256);
+    for (let i = 0; i < 256; i++) {
+      let v = i / 255;
+      // lift blacks
+      v = lift + v * (1 - lift);
+      // gamma
+      v = Math.pow(v, 1 / gamma);
+      // gain
+      v = v * gain;
+      // soft highlight rolloff above `highlightRoll`
+      if (v > highlightRoll) {
+        const excess = v - highlightRoll;
+        v = highlightRoll + (1 - Math.exp(-excess * 3)) * (1 - highlightRoll);
+      }
+      arr[i] = Math.max(0, Math.min(255, Math.round(v * 255)));
+    }
+    return arr;
+  }
+
+  function clamp8(v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
+
+  // --- Chromatic aberration ---
+  function applyChromaticAberration(ctx, W, H) {
+    const src = ctx.getImageData(0, 0, W, H);
+    const out = ctx.createImageData(W, H);
+    const s = src.data, o = out.data;
+    const dx = Math.max(1, Math.round(W * 0.0015));
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 4;
+        const xr = Math.min(W - 1, x + dx);
+        const xb = Math.max(0, x - dx);
+        const ir = (y * W + xr) * 4;
+        const ib = (y * W + xb) * 4;
+        o[i]     = s[ir];     // R from shifted right
+        o[i + 1] = s[i + 1];  // G stays
+        o[i + 2] = s[ib + 2]; // B from shifted left
+        o[i + 3] = 255;
+      }
+    }
+    ctx.putImageData(out, 0, 0);
+  }
+
+  // --- Bloom ---
+  function applyBloom(ctx, W, H) {
+    const src = ctx.getImageData(0, 0, W, H);
+    // build highlight canvas
+    const hi = document.createElement('canvas');
+    hi.width = W; hi.height = H;
+    const hctx = hi.getContext('2d');
+    const himg = hctx.createImageData(W, H);
+    const sd = src.data, hd = himg.data;
+    for (let i = 0; i < sd.length; i += 4) {
+      const lum = 0.2126 * sd[i] + 0.7152 * sd[i + 1] + 0.0722 * sd[i + 2];
+      const thresh = 205;
+      if (lum > thresh) {
+        const t = Math.min(1, (lum - thresh) / 50);
+        hd[i]     = sd[i]     * t;
+        hd[i + 1] = sd[i + 1] * t;
+        hd[i + 2] = sd[i + 2] * t;
+        hd[i + 3] = 255 * t;
+      } else {
+        hd[i + 3] = 0;
+      }
+    }
+    hctx.putImageData(himg, 0, 0);
+
+    // blur the highlights heavily
+    const blurAmount = Math.max(8, Math.round(Math.min(W, H) * 0.025));
+    const blurred = document.createElement('canvas');
+    blurred.width = W; blurred.height = H;
+    const bctx = blurred.getContext('2d');
+    bctx.filter = `blur(${blurAmount}px)`;
+    bctx.drawImage(hi, 0, 0);
+    bctx.filter = 'none';
+
+    // composite using lighter (additive) at reduced alpha for soft bloom
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.55;
+    ctx.drawImage(blurred, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // --- Grain ---
+  function applyGrain(ctx, W, H, strength) {
+    const img = ctx.getImageData(0, 0, W, H);
+    const d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      // luminance-aware grain: more in shadows/midtones, less in highlights
+      const lum = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+      const shadowBoost = 1 - Math.min(1, lum / 220);
+      const n = (Math.random() - 0.5) * strength * (0.5 + shadowBoost);
+      // slight color noise too
+      const cn = (Math.random() - 0.5) * 4;
+      d[i]     = clamp8(d[i]     + n + cn);
+      d[i + 1] = clamp8(d[i + 1] + n);
+      d[i + 2] = clamp8(d[i + 2] + n - cn);
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  // --- Subtle horizontal tape lines + occasional dropout ---
+  function applyTapeLines(ctx, W, H) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = 0.08;
+    for (let y = 0; y < H; y += 2) {
+      ctx.fillStyle = (y % 4 === 0) ? '#cfcfcf' : '#ffffff';
+      ctx.fillRect(0, y, W, 1);
+    }
+    ctx.restore();
+
+    // occasional bright horizontal dropouts (very faint)
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    const lineCount = 2 + Math.floor(Math.random() * 3);
+    for (let k = 0; k < lineCount; k++) {
+      const y = Math.floor(Math.random() * H);
+      const h = 1 + Math.floor(Math.random() * 2);
+      ctx.globalAlpha = 0.05 + Math.random() * 0.08;
+      ctx.fillStyle = '#fff8d8';
+      ctx.fillRect(0, y, W, h);
+    }
+    ctx.restore();
+  }
+
+  // --- Vignette ---
+  function applyVignette(ctx, W, H) {
+    const grad = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.max(W, H) * 0.75);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.45)');
+    ctx.save();
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  // --- '00s digicam date stamp in corner ---
+  function drawDateStamp(ctx, W, H) {
+    const d = new Date();
+    const yy = String(d.getFullYear()).slice(2);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const text = `'${yy} ${mm} ${dd}`;
+    const fontSize = Math.max(14, Math.round(Math.min(W, H) * 0.028));
+    ctx.save();
+    ctx.font = `bold ${fontSize}px "Courier New", monospace`;
+    ctx.textBaseline = 'bottom';
+    ctx.textAlign = 'right';
+    const x = W - Math.round(W * 0.035);
+    const y = H - Math.round(H * 0.035);
+    // glow
+    ctx.shadowColor = 'rgba(255, 120, 40, 0.55)';
+    ctx.shadowBlur = fontSize * 0.5;
+    ctx.fillStyle = '#ff9c3a';
+    ctx.fillText(text, x, y);
+    // crisp core
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ffb866';
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
+  updateUi();
+})();
+</script>
+</body>
+</html>
